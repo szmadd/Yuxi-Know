@@ -111,7 +111,14 @@ async def resolve_agent_run_model_spec(
 
     info = model_cache.get_model_info(model_spec)
     if not info or info.model_type != "chat":
-        raise HTTPException(status_code=422, detail=f"未找到可用聊天模型: '{model_spec}'")
+        # dict detail 带 code/message 属于用户可见业务错误契约，前端按形态透传 message；message 不得包含敏感信息。
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "chat_model_not_found",
+                "message": f"未找到可用聊天模型: '{model_spec}'",
+            },
+        )
     return model_spec
 
 

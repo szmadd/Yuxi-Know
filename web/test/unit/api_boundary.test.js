@@ -434,3 +434,107 @@ test('工具元数据 API 使用普通用户认证且普通用户可正常请求
     assert.equal(result.data[0].slug, 'web_search')
   })
 })
+
+test('业务错误契约 detail（code + message）透传展示文案且丢弃其余字段', async () => {
+  await withServer(async (server) => {
+    storageValues.clear()
+    storageValues.set('user_token', 'test-token')
+    const secretContext = 'secret-internal-context'
+    const logged = []
+    const originalConsoleError = console.error
+
+    try {
+      console.error = (...values) => logged.push(values)
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: 'chat_model_not_found',
+              message: "未找到可用聊天模型: 'ark-coding:kimi-k2.6'",
+              trace: secretContext
+            }
+          }),
+          {
+            status: 422,
+            headers: { 'content-type': 'application/json' }
+          }
+        )
+
+      setActivePinia(createPinia())
+      const { apiPost } = await server.ssrLoadModule('/src/apis/base.js')
+
+      await assert.rejects(apiPost('/api/agent/runs', {}), (error) => {
+        assert.equal(error.status, 422)
+        assert.equal(error.message, "未找到可用聊天模型: 'ark-coding:kimi-k2.6'")
+        assert.deepEqual(error.response.data, {
+          detail: {
+            code: 'chat_model_not_found',
+            message: "未找到可用聊天模型: 'ark-coding:kimi-k2.6'"
+          }
+        })
+        return true
+      })
+
+      const serializedLogs = JSON.stringify(logged)
+      assert.equal(serializedLogs.includes(secretContext), false)
+    } finally {
+      console.error = originalConsoleError
+    }
+  })
+})
+
+test('409 run_interrupted 契约 detail 恢复 isRunInterruptedConflict 识别', async () => {
+  await withServer(async (server) => {
+    storageValues.clear()
+    storageValues.set('user_token', 'test-token')
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          detail: { code: 'run_interrupted', message: '当前线程已被中断，请刷新后重试' }
+        }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/json' }
+        }
+      )
+
+    setActivePinia(createPinia())
+    const { apiPost } = await server.ssrLoadModule('/src/apis/base.js')
+    const { isRunInterruptedConflict } = await server.ssrLoadModule('/src/utils/toolApproval.js')
+
+    const error = await apiPost('/api/agent/runs', {}).catch((err) => err)
+    assert.equal(error.status, 409)
+    assert.equal(isRunInterruptedConflict(error), true)
+    assert.equal(error.message, '当前线程已被中断，请刷新后重试')
+  })
+})
+
+test('缺少 code 或 message 非字符串的对象 detail 仍被掩码', async () => {
+  await withServer(async (server) => {
+    storageValues.clear()
+    storageValues.set('user_token', 'test-token')
+    const secretDetail = 'secret-detail-text'
+    const bodies = [
+      { detail: { message: secretDetail } },
+      { detail: { code: 'some_code', message: { nested: secretDetail } } }
+    ]
+
+    setActivePinia(createPinia())
+    const { apiPost } = await server.ssrLoadModule('/src/apis/base.js')
+
+    for (const body of bodies) {
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify(body), {
+          status: 422,
+          headers: { 'content-type': 'application/json' }
+        })
+
+      await assert.rejects(apiPost('/api/agent/runs', {}), (error) => {
+        assert.equal(error.status, 422)
+        assert.equal(error.message, '请求参数验证失败')
+        assert.deepEqual(error.response.data, { detail: '请求参数验证失败' })
+        return true
+      })
+    }
+  })
+})

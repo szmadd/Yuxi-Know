@@ -1904,6 +1904,10 @@ async def test_resolve_agent_run_model_spec_rejects_unknown_explicit_model(monke
     with pytest.raises(agent_run_service.HTTPException) as exc:
         await agent_run_service.resolve_agent_run_model_spec("nope", "default:model")
     assert exc.value.status_code == 422
+    assert exc.value.detail == {
+        "code": "chat_model_not_found",
+        "message": "未找到可用聊天模型: 'nope'",
+    }
 
 
 @pytest.mark.asyncio
@@ -1916,6 +1920,7 @@ async def test_resolve_agent_run_model_spec_rejects_non_chat_explicit_model(monk
     with pytest.raises(agent_run_service.HTTPException) as exc:
         await agent_run_service.resolve_agent_run_model_spec("embed-1", "default:model")
     assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "chat_model_not_found"
 
 
 @pytest.mark.asyncio
@@ -1957,6 +1962,7 @@ async def test_resolve_agent_run_model_spec_validates_configured_model(monkeypat
         await agent_run_service.resolve_agent_run_model_spec(None, "missing:model")
 
     assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "chat_model_not_found"
 
 
 def _patch_agent_run_creation(
